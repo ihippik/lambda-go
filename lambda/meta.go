@@ -14,3 +14,7 @@ func newMetaData(containerID string, port int) *metaData {
 func (m metaData) address() string {
 	return "http://localhost:" + strconv.Itoa(m.port)
 }
+
+func (m metaData) short() string {
+	return m.containerID[:5]
+}

@@ -3,8 +3,10 @@ module github.com/ihippik/lambda-go
 go 1.21.1
 
 require (
+	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/docker/docker v23.0.3+incompatible
 	github.com/docker/go-connections v0.4.0
+	github.com/gorilla/mux v1.8.0
 	github.com/ihippik/config v0.1.1
 	github.com/sethvargo/go-envconfig v0.9.0
 )
@@ -20,7 +22,6 @@ require (
 	github.com/getsentry/sentry-go v0.23.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
-	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/ihippik/slog-sentry v0.1.0 // indirect
 	github.com/klauspost/compress v1.16.7 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect

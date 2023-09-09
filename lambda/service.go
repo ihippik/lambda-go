@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/avast/retry-go"
+
 	"github.com/ihippik/lambda-go/config"
 )
 
@@ -84,28 +86,9 @@ func (s *Service) Invoke(ctx context.Context, name string, data []byte) ([]byte,
 		return nil, fmt.Errorf("start container: %w", err)
 	}
 
-	// FIXME: need to wait for container start
-
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		containerMeta.address(),
-		bytes.NewReader(data),
-	)
+	respData, err := s.makeRequest(ctx, data, containerMeta)
 	if err != nil {
-		return nil, fmt.Errorf("post request: %w", err)
-	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("do request: %w", err)
-	}
-
-	defer resp.Body.Close()
-
-	respData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response body: %w", err)
+		return nil, fmt.Errorf("make request: %w", err)
 	}
 
 	if err := s.builder.ContainerStop(ctx, containerMeta.containerID); err != nil {
@@ -115,6 +98,47 @@ func (s *Service) Invoke(ctx context.Context, name string, data []byte) ([]byte,
 	return respData, nil
 }
 
+// makeRequest makes http request to container with Lambda.
+// Using retry pattern for waiting container ready for requests.
+func (s *Service) makeRequest(ctx context.Context, data []byte, meta *metaData) ([]byte, error) {
+	const numAttempts = 3
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		meta.address(),
+		bytes.NewReader(data),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("post request: %w", err)
+	}
+
+	var respData []byte
+
+	if err = retry.Do(
+		func() error {
+			resp, err := s.client.Do(req)
+			if err != nil {
+				return fmt.Errorf("do request: %w", err)
+			}
+			defer resp.Body.Close()
+
+			respData, err = io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("read response body: %w", err)
+			}
+
+			return nil
+		},
+		retry.Attempts(numAttempts),
+	); err != nil {
+		return nil, err
+	}
+
+	return respData, nil
+}
+
+// decompress decompresses tar.gz archive.
 func (s *Service) decompress(dst string, file io.ReadCloser) error {
 	uncompressedStream, err := gzip.NewReader(file)
 	if err != nil {
