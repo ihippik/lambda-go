@@ -2,6 +2,8 @@ package lambda
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,7 +13,7 @@ import (
 )
 
 type service interface {
-	Create(ctx context.Context, name string) error
+	Create(ctx context.Context, name string, file io.ReadCloser) error
 	Invoke(ctx context.Context, name string, data []byte) ([]byte, error)
 }
 
@@ -27,32 +29,47 @@ func NewEndpoint(svc service, logger *slog.Logger, addr string) *Endpoint {
 	return &Endpoint{svc: svc, logger: logger, serverAddr: addr}
 }
 
-type adminRequest struct {
-	Name string `json:"name"`
+type createResponse struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
+// create http endpoint for create lambda function.
 func (e *Endpoint) create(w http.ResponseWriter, r *http.Request) {
+	const gzHeader = "application/gzip"
 	vars := mux.Vars(r)
 	name := vars["name"]
 
-	// TODO: get tar archive from request body
-
-	//
-	//if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-	//	http.Error(w, err.Error(), http.StatusBadRequest)
-	//	return
-	//}
-
-	e.logger.Debug("got create request", slog.Any("user_name", name))
-
-	err := e.svc.Create(r.Context(), name)
+	file, fileHeader, err := r.FormFile("file")
 	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	if fileHeader.Header.Get("Content-Type") != gzHeader {
+		http.Error(w, "invalid file type", http.StatusBadRequest)
+		return
+	}
+
+	e.logger.Info("got create request", slog.Any("func_name", name))
+
+	if err := e.svc.Create(r.Context(), name, file); err != nil {
 		e.logger.Error("create: service error", "err", err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	_, err = w.Write([]byte("ok"))
+	resp := createResponse{Name: name, Description: "lambda function was created"}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		e.logger.Error("create: marshal error", "err", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+
+	_, err = w.Write(data)
 	if err != nil {
 		e.logger.Error("create: write error", "err", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -60,7 +77,8 @@ func (e *Endpoint) create(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (e *Endpoint) lambda(w http.ResponseWriter, r *http.Request) {
+// invoke http endpoint for invoke lambda function.
+func (e *Endpoint) invoke(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	name := vars["name"]
 
@@ -71,9 +89,9 @@ func (e *Endpoint) lambda(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	e.logger.Debug("got lambda request", slog.Any("user_name", name))
+	e.logger.Info("got lambda request", slog.Any("func_name", name))
 
-	respData, err := e.svc.Invoke(r.Context(), "test", data)
+	respData, err := e.svc.Invoke(r.Context(), name, data)
 	if err != nil {
 		e.logger.Error("lambda: invoke service error", "err", err.Error())
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -90,8 +108,8 @@ func (e *Endpoint) lambda(w http.ResponseWriter, r *http.Request) {
 // StartServer starts http-server.
 func (e *Endpoint) StartServer(ctx context.Context) error {
 	r := mux.NewRouter()
-	r.HandleFunc("/lambda/{name}/create", e.create)
-	r.HandleFunc("/lambda/{name}/run", e.lambda)
+	r.HandleFunc("/lambda/{name}/create", e.create).Methods(http.MethodPost)
+	r.HandleFunc("/lambda/{name}/invoke", e.invoke).Methods(http.MethodPost)
 
 	srv := &http.Server{
 		Handler:      r,

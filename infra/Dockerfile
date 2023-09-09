@@ -4,9 +4,9 @@ WORKDIR /tmp/server-app
 
 COPY go.mod ./
 COPY go.sum ./
+COPY main.go ./
+RUN go mod tidy
 RUN go mod download
-
-COPY *.go ./
 
 # Build
 RUN CGO_ENABLED=0 GOOS=linux go build -o ./out/server-app .

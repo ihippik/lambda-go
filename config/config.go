@@ -14,8 +14,8 @@ type Config struct {
 	App AppCfg      `env:",prefix=APP_,required"`
 }
 
+// AppCfg is a configuration for the application.
 type AppCfg struct {
-	FuncAddr   string `env:"FUNC_ADDR,required"`
 	ServerAddr string `env:"SERVER_ADDR,required"`
 }
 

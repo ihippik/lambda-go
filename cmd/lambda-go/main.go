@@ -32,8 +32,8 @@ func main() {
 		return
 	}
 
-	c := builder.NewDocker(logger, cli)
-	svc := lambda.NewService(conf, logger, c)
+	bld := builder.NewDocker(logger, cli)
+	svc := lambda.NewService(conf, logger, bld)
 	edp := lambda.NewEndpoint(svc, logger, conf.App.ServerAddr)
 
 	if err := edp.StartServer(ctx); err != nil {

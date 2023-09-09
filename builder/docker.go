@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -23,17 +24,17 @@ func NewDocker(logger *slog.Logger, cli *client.Client) *Docker {
 	return &Docker{cli: cli, logger: logger}
 }
 
-// Build builds docker image.
-func (d Docker) Build(ctx context.Context, file string) (string, error) {
-	tar, err := archive.TarWithOptions("infra/", &archive.TarOptions{})
+// ImageBuild builds docker image.
+func (d Docker) ImageBuild(ctx context.Context, dst, name string) (string, error) {
+	tar, err := archive.TarWithOptions(dst, &archive.TarOptions{})
 	if err != nil {
 		return "", fmt.Errorf("failed to create tar: %w", err)
 	}
 
-	tag := "ihippik/go-lambda:v1.0.0"
+	tag := "go-lambda:" + name
 
 	opts := types.ImageBuildOptions{
-		Dockerfile: file,
+		Dockerfile: "Dockerfile",
 		Tags:       []string{tag},
 		Remove:     true,
 	}
@@ -54,8 +55,8 @@ func (d Docker) Build(ctx context.Context, file string) (string, error) {
 	return tag, nil
 }
 
-// Run create and runs docker container.
-func (d Docker) Run(ctx context.Context, image string) error {
+// ContainerCreate creates Docker container.
+func (d Docker) ContainerCreate(ctx context.Context, image string, port int) (string, error) {
 	resp, err := d.cli.ContainerCreate(
 		ctx, &container.Config{
 			Image: image,
@@ -67,7 +68,7 @@ func (d Docker) Run(ctx context.Context, image string) error {
 				"8080/tcp": []nat.PortBinding{
 					{
 						HostIP:   "0.0.0.0",
-						HostPort: "8080",
+						HostPort: strconv.Itoa(port),
 					},
 				},
 			},
@@ -77,16 +78,32 @@ func (d Docker) Run(ctx context.Context, image string) error {
 		"go-lambda",
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create container: %w", err)
+		return "", fmt.Errorf("failed to create container: %w", err)
 	}
 
-	d.logger.Debug("container created", slog.String("id", resp.ID))
+	d.logger.Info("container created", slog.String("id", resp.ID[:5]), slog.Int("port", port))
 
-	if err := d.cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
+	return resp.ID, nil
+}
+
+// ContainerStart starts Docker container.
+func (d Docker) ContainerStart(ctx context.Context, imageID string) error {
+	if err := d.cli.ContainerStart(ctx, imageID, types.ContainerStartOptions{}); err != nil {
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
-	d.logger.Debug("container started", slog.String("id", resp.ID))
+	d.logger.Debug("container started", slog.String("id", imageID[:5]))
+
+	return nil
+}
+
+// ContainerStop stops Docker container.
+func (d Docker) ContainerStop(ctx context.Context, imageID string) error {
+	if err := d.cli.ContainerStop(ctx, imageID, container.StopOptions{}); err != nil {
+		return fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	d.logger.Debug("container stopped", slog.String("id", imageID[:5]))
 
 	return nil
 }
