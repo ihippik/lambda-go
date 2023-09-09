@@ -40,6 +40,8 @@ func (h handle) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		if _, err := writer.Write(errData); err != nil {
 			slog.Error(err.Error())
 		}
+
+		return
 	}
 
 	respData, err := h.handler(request.Context(), data)
@@ -49,6 +51,8 @@ func (h handle) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		if _, err := writer.Write(errData); err != nil {
 			slog.Error(err.Error())
 		}
+
+		return
 	}
 
 	if _, err = writer.Write(respData); err != nil {
