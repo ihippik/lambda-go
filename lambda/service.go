@@ -51,6 +51,8 @@ func NewService(cfg *config.Config, log *slog.Logger, container builder) *Servic
 	}
 }
 
+// Init initializes service.
+// It gets all containers with name "go-lambda" and registers them in the service.
 func (s *Service) Init(ctx context.Context) error {
 	containers, err := s.builder.ContainersList(ctx)
 	if err != nil {
@@ -80,32 +82,14 @@ func (s *Service) Init(ctx context.Context) error {
 	return nil
 }
 
-// parseContainerData parses container data and returns container image tag (user func name) and port.
-func (s *Service) parseContainerData(data types.ContainerJSON) (string, int, error) {
-	image := strings.Split(data.Config.Image, ":")
-	if len(image) != 2 {
-		return "", 0, errors.New("invalid image name")
-	}
-
-	tag := image[1]
-
-	for _, v := range data.ContainerJSONBase.HostConfig.PortBindings {
-		if len(v) == 0 {
-			continue
-		}
-
-		port, err := strconv.Atoi(v[0].HostPort)
-		if err != nil {
-			return "", 0, fmt.Errorf("parse port: %w", err)
-		}
-
-		return tag, port, nil
-	}
-
-	return "", 0, errors.New("port not found")
-}
-
+// Create creates new lambda function. If function with the same name already exists, it will skip.
 func (s *Service) Create(ctx context.Context, name string, file io.ReadCloser) error {
+	// TODO: if alert exists, need to overwrite it
+	if _, exists := s.register.Load(name); exists {
+		s.log.Info("container already exists", slog.String("name", name))
+		return nil
+	}
+
 	port := rand.Intn(65535-1024) + 1024
 
 	if err := s.decompress("infra", file); err != nil {
@@ -238,4 +222,29 @@ func (s *Service) decompress(dst string, file io.ReadCloser) error {
 	}
 
 	return nil
+}
+
+// parseContainerData parses container data and returns container image tag (user func name) and port.
+func (s *Service) parseContainerData(data types.ContainerJSON) (string, int, error) {
+	image := strings.Split(data.Config.Image, ":")
+	if len(image) != 2 {
+		return "", 0, errors.New("invalid image name")
+	}
+
+	tag := image[1]
+
+	for _, v := range data.ContainerJSONBase.HostConfig.PortBindings {
+		if len(v) == 0 {
+			continue
+		}
+
+		port, err := strconv.Atoi(v[0].HostPort)
+		if err != nil {
+			return "", 0, fmt.Errorf("parse port: %w", err)
+		}
+
+		return tag, port, nil
+	}
+
+	return "", 0, errors.New("port not found")
 }
