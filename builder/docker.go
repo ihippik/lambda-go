@@ -107,3 +107,23 @@ func (d Docker) ContainerStop(ctx context.Context, imageID string) error {
 
 	return nil
 }
+
+// ContainersList lists all Docker containers.
+func (d Docker) ContainersList(ctx context.Context) ([]types.Container, error) {
+	containers, err := d.cli.ContainerList(ctx, types.ContainerListOptions{All: true})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	return containers, nil
+}
+
+// ContainerInspect inspects Docker container.
+func (d Docker) ContainerInspect(ctx context.Context, containerID string) (types.ContainerJSON, error) {
+	data, err := d.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return types.ContainerJSON{}, fmt.Errorf("failed to inspect container: %w", err)
+	}
+
+	return data, nil
+}

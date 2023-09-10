@@ -13,10 +13,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/avast/retry-go"
+	"github.com/docker/docker/api/types"
 
 	"github.com/ihippik/lambda-go/config"
 )
@@ -26,6 +28,8 @@ type builder interface {
 	ContainerCreate(ctx context.Context, image string, port int) (string, error)
 	ContainerStart(ctx context.Context, containerID string) error
 	ContainerStop(ctx context.Context, containerID string) error
+	ContainersList(ctx context.Context) ([]types.Container, error)
+	ContainerInspect(ctx context.Context, containerID string) (types.ContainerJSON, error)
 }
 
 // Service is a service for lambda.
@@ -45,6 +49,60 @@ func NewService(cfg *config.Config, log *slog.Logger, container builder) *Servic
 		builder: container,
 		client:  http.DefaultClient,
 	}
+}
+
+func (s *Service) Init(ctx context.Context) error {
+	containers, err := s.builder.ContainersList(ctx)
+	if err != nil {
+		return fmt.Errorf("list containers: %w", err)
+	}
+
+	for _, container := range containers {
+		if len(container.Names) > 0 && container.Names[0] != "/go-lambda" {
+			continue
+		}
+
+		data, err := s.builder.ContainerInspect(ctx, container.ID)
+		if err != nil {
+			return fmt.Errorf("inspect container: %w", err)
+		}
+
+		funcName, port, err := s.parseContainerData(data)
+		if err != nil {
+			return fmt.Errorf("parse container data: %w", err)
+		}
+
+		s.register.Store(funcName, newMetaData(container.ID, port))
+
+		s.log.Info("init: register function", "name", funcName, "port", port)
+	}
+
+	return nil
+}
+
+// parseContainerData parses container data and returns container image tag (user func name) and port.
+func (s *Service) parseContainerData(data types.ContainerJSON) (string, int, error) {
+	image := strings.Split(data.Config.Image, ":")
+	if len(image) != 2 {
+		return "", 0, errors.New("invalid image name")
+	}
+
+	tag := image[1]
+
+	for _, v := range data.ContainerJSONBase.HostConfig.PortBindings {
+		if len(v) == 0 {
+			continue
+		}
+
+		port, err := strconv.Atoi(v[0].HostPort)
+		if err != nil {
+			return "", 0, fmt.Errorf("parse port: %w", err)
+		}
+
+		return tag, port, nil
+	}
+
+	return "", 0, errors.New("port not found")
 }
 
 func (s *Service) Create(ctx context.Context, name string, file io.ReadCloser) error {

@@ -36,6 +36,11 @@ func main() {
 	svc := lambda.NewService(conf, logger, bld)
 	edp := lambda.NewEndpoint(svc, logger, conf.App.ServerAddr)
 
+	if err := svc.Init(ctx); err != nil {
+		slog.Error("failed to init service", "err", err)
+		return
+	}
+
 	if err := edp.StartServer(ctx); err != nil {
 		slog.Error("run", "err", err)
 	}
