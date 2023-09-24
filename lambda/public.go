@@ -2,17 +2,21 @@ package lambda
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"log/slog"
-	"net/http"
-	"time"
+	"net"
+
+	"google.golang.org/grpc"
+
+	"github.com/ihippik/lambda-go/lambda/proto"
 )
 
 // Handler is a user function that handles lambda requests.
 type Handler func(ctx context.Context, payload []byte) ([]byte, error)
 
-// handle is a wrapper for user Handler.
-type handle struct {
+// Server is a wrapper for user Handler.
+type Server struct {
+	proto.UnimplementedLambdaServerServer
 	handler Handler
 }
 
@@ -20,42 +24,30 @@ type handle struct {
 func Start(handler Handler) {
 	const serverAddr = ":8080"
 
-	server := http.Server{
-		Addr:         serverAddr,
-		Handler:      handle{handler: handler},
-		WriteTimeout: 2 * time.Second,
+	lis, err := net.Listen("tcp", serverAddr)
+	if err != nil {
+		slog.Error(err.Error())
 	}
+	defer lis.Close()
 
-	if err := server.ListenAndServe(); err != nil {
+	grpcServer := grpc.NewServer()
+
+	proto.RegisterLambdaServerServer(grpcServer, &Server{handler: handler})
+
+	if err := grpcServer.Serve(lis); err != nil {
 		slog.Error(err.Error())
 	}
 }
 
-// ServeHTTP implements http.Handler interface.
-func (h handle) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	data, err := io.ReadAll(request.Body)
+func (h *Server) MakeRequest(ctx context.Context, payload *proto.Payload) (*proto.Payload, error) {
+	slog.Debug("got request", "payload_size", len(payload.Data))
+
+	respData, err := h.handler(ctx, payload.Data)
 	if err != nil {
-		errData := NewError(http.StatusBadRequest, err.Error()).Error()
-
-		if _, err := writer.Write(errData); err != nil {
-			slog.Error(err.Error())
-		}
-
-		return
+		return nil, fmt.Errorf("handler: %w", err)
 	}
 
-	respData, err := h.handler(request.Context(), data)
-	if err != nil {
-		errData := NewError(http.StatusConflict, err.Error()).Error()
+	slog.Debug("got response", "payload_size", "response_size", len(respData))
 
-		if _, err := writer.Write(errData); err != nil {
-			slog.Error(err.Error())
-		}
-
-		return
-	}
-
-	if _, err = writer.Write(respData); err != nil {
-		slog.Error(err.Error())
-	}
+	return &proto.Payload{Data: respData}, nil
 }
