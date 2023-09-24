@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package lambda;
+
+option go_package = "github.com/ihippik/lambda-go/proto";
+
+service LambdaServer {
+  rpc MakeRequest(Payload) returns (Payload);
+}
+
+message Payload {
+  bytes data = 1;
+}

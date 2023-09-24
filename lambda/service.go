@@ -2,7 +2,6 @@ package lambda
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -19,8 +18,11 @@ import (
 
 	"github.com/avast/retry-go"
 	"github.com/docker/docker/api/types"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/ihippik/lambda-go/config"
+	"github.com/ihippik/lambda-go/lambda/proto"
 )
 
 type builder interface {
@@ -84,7 +86,7 @@ func (s *Service) Init(ctx context.Context) error {
 
 // Create creates new lambda function. If function with the same name already exists, it will skip.
 func (s *Service) Create(ctx context.Context, name string, file io.ReadCloser) error {
-	// TODO: if alert exists, need to overwrite it
+	// TODO: if container exists, need to overwrite it
 	if _, exists := s.register.Load(name); exists {
 		s.log.Info("container already exists", slog.String("name", name))
 		return nil
@@ -133,8 +135,10 @@ func (s *Service) Invoke(ctx context.Context, name string, data []byte) ([]byte,
 		return nil, fmt.Errorf("make request: %w", err)
 	}
 
-	if err := s.builder.ContainerStop(ctx, containerMeta.containerID); err != nil {
-		return nil, fmt.Errorf("stop container: %w", err)
+	if !containerMeta.hotMode {
+		if err := s.builder.ContainerStop(ctx, containerMeta.containerID); err != nil {
+			return nil, fmt.Errorf("stop container: %w", err)
+		}
 	}
 
 	return respData, nil
@@ -143,41 +147,42 @@ func (s *Service) Invoke(ctx context.Context, name string, data []byte) ([]byte,
 // makeRequest makes http request to container with Lambda.
 // Using retry pattern for waiting container ready for requests.
 func (s *Service) makeRequest(ctx context.Context, data []byte, meta *metaData) ([]byte, error) {
-	const numAttempts = 3
+	const numAttempts = 5
 
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		meta.address(),
-		bytes.NewReader(data),
-	)
+	s.log.Info("make request", "size", len(data), "address", meta.address())
+
+	conn, err := grpc.Dial(meta.address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return nil, fmt.Errorf("post request: %w", err)
+		return nil, err
 	}
+	defer conn.Close()
 
-	var respData []byte
+	var resp []byte
+
+	// Create a gRPC client.
+	client := proto.NewLambdaServerClient(conn)
 
 	if err = retry.Do(
 		func() error {
-			resp, err := s.client.Do(req)
+			r, err := client.MakeRequest(ctx, &proto.Payload{
+				Data: data,
+			})
 			if err != nil {
-				return fmt.Errorf("do request: %w", err)
+				s.log.Warn("make request", "error", err)
+				return err
 			}
-			defer resp.Body.Close()
 
-			respData, err = io.ReadAll(resp.Body)
-			if err != nil {
-				return fmt.Errorf("read response body: %w", err)
-			}
+			resp = r.Data
 
 			return nil
 		},
+		retry.DelayType(retry.BackOffDelay),
 		retry.Attempts(numAttempts),
 	); err != nil {
-		return nil, err
+		return nil, errors.New("failed GRPC request")
 	}
 
-	return respData, nil
+	return resp, nil
 }
 
 // decompress decompresses tar.gz archive.
