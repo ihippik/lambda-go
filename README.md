@@ -1,5 +1,7 @@
 # Lambda-Go
 
+[![Publish Docker image](https://github.com/ihippik/lambda-go/actions/workflows/github-actions.yml/badge.svg)](https://github.com/ihippik/lambda-go/actions/workflows/github-actions.yml)
+
 This project is an attempt to understand how the most popular serverless computing solution, Lambda functions, works.
 
 It was inspired by the most popular solution, [AWS Lambda](https://aws.amazon.com/lambda/).
