@@ -1,6 +1,6 @@
 module github.com/ihippik/lambda-go
 
-go 1.21.1
+go 1.21.5
 
 require (
 	github.com/avast/retry-go v3.0.0+incompatible
